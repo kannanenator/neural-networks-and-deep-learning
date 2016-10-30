@@ -44,7 +44,7 @@ class Network(object):
         return a
 
     def SGD(self, training_data, epochs, mini_batch_size, eta,
-            test_data=None):
+            test_data=None, matrix=False):
         """Train the neural network using mini-batch stochastic
         gradient descent.  The ``training_data`` is a list of tuples
         ``(x, y)`` representing the training inputs and the desired
@@ -62,7 +62,10 @@ class Network(object):
                 mini_batches = [training_data[k:k+mini_batch_size]
                     for k in xrange(0, n, mini_batch_size)]
                 for mini_batch in mini_batches:
-                    self.update_mini_batch(mini_batch, eta)
+                    if matrix:
+                        self.update_mini_batch_matrix(mini_batch, eta)
+                    else:
+                        self.update_mini_batch(mini_batch, eta)
                 if test_data:
                     print "Epoch {0}: {1} / {2}".format(
                         j, self.evaluate(test_data), n_test)
@@ -75,7 +78,10 @@ class Network(object):
         nabla_w = [np.zeros(w.shape) for w in self.weights]
 
         # transform mini_batch into a 2d array and get x and y chunks
-        x, y = mini_batch[:,(0,-1)], mini_batch[:,-1]
+        x_list, y_list = zip(*mini_batch)
+        x = np.array(x_list).squeeze()
+        y = np.array(y_list).squeeze()
+        
         delta_nabla_b, delta_nabla_w = self.backprop_matrix(x, y) # matrix backprop
 
         # add all the gradients at once
@@ -83,9 +89,9 @@ class Network(object):
         nabla_w = [nw+dnw for nw, dnw in zip(nabla_w, delta_nabla_w)]
 
         # same weight/bias updates
-        self.weights = [w-(eta/len(mini_batch))*nw
+        self.weights = [w-eta*nw
                         for w, nw in zip(self.weights, nabla_w)]
-        self.biases = [b-(eta/len(mini_batch))*nb
+        self.biases = [b-eta*nb
                        for b, nb in zip(self.biases, nabla_b)]
 
 
@@ -119,15 +125,30 @@ class Network(object):
         activation = x
 
         for b, w in zip(self.biases, self.weights):
-            z = np.dot(w, np.transpose(activation)) + b
+            #print "biases: {0}, weights: {1}, activations: {2}".format(b.shape, w.shape, activation.shape)
+            z = np.transpose(np.dot(w, np.transpose(activation)) + b)
             activation = sigmoid(z)
             zs.append(z)
             activations.append(activation)
 
         delta = self.cost_derivative(activations[-1], y) *\
                 sigmoid_prime(zs[-1])
-        nabla_b[-1] = delta
-        #nabla_w[-1] = 
+        #print "delta dim {0}".format(delta.shape)
+        nabla_b[-1] = np.transpose(np.mean(delta, axis=0, keepdims=True))
+        nabla_w[-1] = np.transpose(np.dot(activations[-2].transpose(), delta))/delta.shape[0]
+        #print nabla_w[-1].shape
+        #print nabla_b[-1].shape
+
+        for l in range(2, self.num_layers):
+            z = zs[-l]
+            sp = sigmoid_prime(z)
+            delta = np.dot(delta, self.weights[-l+1]) * sp
+            #print "delta dim {0}".format(delta.shape)
+            nabla_b[-l] = np.transpose(np.mean(delta, axis=0, keepdims=True))
+            nabla_w[-l] = np.transpose(np.dot(activations[-l-1].transpose(), delta))/delta.shape[0]
+            #print nabla_w[-l].shape
+            #print nabla_b[-l].shape
+        return nabla_b, nabla_w
 
 
     def backprop(self, x, y):
@@ -194,4 +215,4 @@ def context_timer(name):
     startTime = time.time()
     yield
     elapsedTime = time.time() - startTime
-    print "{0} finished in {1} s".format(name, int(elapsedTime))
+    print "{0} finished in {1} ms".format(name, int(elapsedTime*1000))
